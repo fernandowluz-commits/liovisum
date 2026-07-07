@@ -192,44 +192,90 @@ const lentes = [
   {brand:'BVI',               nome:'Micropure',                    custo:420,     cat:'baixo'},
 ];
 
-// ── PERSISTÊNCIA localStorage ────────────────────────────────────
-const STORAGE_KEY = 'liovisum_v2';
+// ── PERSISTÊNCIA GitHub API ──────────────────────────────────────
+const GH_TOKEN  = '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';
+const GH_REPO   = 'admclinicavisum-byte/liovisum';
+const GH_FILE   = 'dados.json';
+const GH_API    = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ custos, precos }));
-    const ind = document.getElementById('saved-indicator');
-    if (ind) { ind.style.display='inline'; clearTimeout(ind._t); ind._t = setTimeout(()=>ind.style.display='none', 2000); }
-  } catch(e) {}
+function showIndicator(msg, color) {
+  const ind = document.getElementById('saved-indicator');
+  if (!ind) return;
+  ind.textContent = msg;
+  ind.style.color = color || '#8ecf93';
+  ind.style.display = 'inline';
+  clearTimeout(ind._t);
+  ind._t = setTimeout(() => ind.style.display = 'none', 3000);
 }
 
-function resetState() {
+async function saveState() {
+  showIndicator('⟳ Salvando...', '#a0a09c');
+  try {
+    const data = { custos, precos };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+
+    // Buscar SHA atual do arquivo (necessário para atualizar)
+    let sha = null;
+    try {
+      const r = await fetch(GH_API, {
+        headers: { 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
+      });
+      if (r.ok) { const j = await r.json(); sha = j.sha; }
+    } catch(e) {}
+
+    const body = { message: 'Atualizar dados LIO', content: encoded };
+    if (sha) body.sha = sha;
+
+    const res = await fetch(GH_API, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `token ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (res.ok) {
+      showIndicator('● Valores salvos', '#8ecf93');
+    } else {
+      showIndicator('⚠ Erro ao salvar', '#f5a623');
+    }
+  } catch(e) {
+    showIndicator('⚠ Erro ao salvar', '#f5a623');
+  }
+}
+
+async function loadState() {
+  showIndicator('⟳ Carregando...', '#a0a09c');
+  try {
+    const res = await fetch(GH_API + '?ref=main', {
+      headers: { 'Authorization': `token ${GH_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if (!res.ok) { showIndicator('', ''); return; }
+    const json = await res.json();
+    const saved = JSON.parse(decodeURIComponent(escape(atob(json.content))));
+    if (saved) {
+      if (Array.isArray(saved.custos) && saved.custos.length === lentes.length) custos = saved.custos;
+      if (saved.precos && typeof saved.precos === 'object') precos = { ...precos, ...saved.precos };
+    }
+    showIndicator('● Dados carregados', '#8ecf93');
+  } catch(e) {
+    showIndicator('', '');
+  }
+}
+
+async function resetState() {
   if (!confirm('Restaurar todos os valores para o padrão original?')) return;
-  localStorage.removeItem(STORAGE_KEY);
   custos = lentes.map(l => l.custo);
   precos = { alto:10800, medio:5800, baixo:4200 };
+  await saveState();
   buildFaixas();
   render();
 }
 
-function loadState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (saved) {
-      if (Array.isArray(saved.custos) && saved.custos.length === lentes.length) {
-        custos = saved.custos;
-      }
-      if (saved.precos && typeof saved.precos === 'object') {
-        precos = { ...precos, ...saved.precos };
-      }
-    }
-  } catch(e) {}
-}
-
 let custos = lentes.map(l => l.custo);
 let currentPlan = 0;
-
-loadState();
 
 document.getElementById('hoje').textContent = 'Atualizado em ' + new Date().toLocaleDateString('pt-BR');
 
@@ -420,8 +466,11 @@ document.getElementById('tabs').addEventListener('click', e => {
   render();
 });
 
-buildFaixas();
-render();
+(async () => {
+  await loadState();
+  buildFaixas();
+  render();
+})();
 </script>
 </body>
 </html>
