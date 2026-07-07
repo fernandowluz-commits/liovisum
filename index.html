@@ -192,29 +192,66 @@ const lentes = [
   {brand:'BVI',               nome:'Micropure',                    custo:420,     cat:'baixo'},
 ];
 
-// ── PERSISTÊNCIA localStorage ────────────────────────────────────
-const STORAGE_KEY = 'liovisum_v2';
+// ── PERSISTÊNCIA JSONBin ─────────────────────────────────────────
+const JSONBIN_KEY = '$2a$10$SWiGEKvn8miZv8.ldNfGGOolJNGYns1wIRhw9GcXKOpJ11YP3bYwa';
+const JSONBIN_URL = 'https://api.jsonbin.io/v3/b';
+let JSONBIN_BIN_ID = localStorage.getItem('liovisum_bin_id') || null;
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ custos, precos }));
-    const ind = document.getElementById('saved-indicator');
-    if (ind) { ind.style.display='inline'; clearTimeout(ind._t); ind._t = setTimeout(()=>ind.style.display='none', 2000); }
-  } catch(e) {}
+function showIndicator(msg, color) {
+  const ind = document.getElementById('saved-indicator');
+  if (!ind) return;
+  ind.textContent = msg;
+  ind.style.color = color || '#8ecf93';
+  ind.style.display = 'inline';
+  clearTimeout(ind._t);
+  ind._t = setTimeout(() => ind.style.display = 'none', 3000);
 }
 
-function resetState() {
-  if (!confirm('Restaurar todos os valores para o padrão original?')) return;
-  localStorage.removeItem(STORAGE_KEY);
-  custos = lentes.map(l => l.custo);
-  precos = { alto:10800, medio:5800, baixo:4200 };
-  buildFaixas();
-  render();
+async function saveState() {
+  const data = { custos, precos };
+  try {
+    if (!JSONBIN_BIN_ID) {
+      // Criar bin novo
+      const res = await fetch(JSONBIN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': JSONBIN_KEY,
+          'X-Bin-Name': 'liovisum',
+          'X-Bin-Private': 'false'
+        },
+        body: JSON.stringify(data)
+      });
+      const json = await res.json();
+      JSONBIN_BIN_ID = json.metadata.id;
+      localStorage.setItem('liovisum_bin_id', JSONBIN_BIN_ID);
+      showIndicator('● Valores salvos', '#8ecf93');
+    } else {
+      // Atualizar bin existente
+      await fetch(`${JSONBIN_URL}/${JSONBIN_BIN_ID}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Master-Key': JSONBIN_KEY
+        },
+        body: JSON.stringify(data)
+      });
+      showIndicator('● Valores salvos', '#8ecf93');
+    }
+  } catch(e) {
+    showIndicator('⚠ Erro ao salvar', '#f5a623');
+  }
 }
 
-function loadState() {
+async function loadState() {
+  if (!JSONBIN_BIN_ID) return;
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    showIndicator('⟳ Carregando...', '#a0a09c');
+    const res = await fetch(`${JSONBIN_URL}/${JSONBIN_BIN_ID}/latest`, {
+      headers: { 'X-Master-Key': JSONBIN_KEY }
+    });
+    const json = await res.json();
+    const saved = json.record;
     if (saved) {
       if (Array.isArray(saved.custos) && saved.custos.length === lentes.length) {
         custos = saved.custos;
@@ -223,13 +260,23 @@ function loadState() {
         precos = { ...precos, ...saved.precos };
       }
     }
-  } catch(e) {}
+    showIndicator('● Dados carregados', '#8ecf93');
+  } catch(e) {
+    showIndicator('⚠ Erro ao carregar', '#f5a623');
+  }
+}
+
+async function resetState() {
+  if (!confirm('Restaurar todos os valores para o padrão original?')) return;
+  custos = lentes.map(l => l.custo);
+  precos = { alto:10800, medio:5800, baixo:4200 };
+  await saveState();
+  buildFaixas();
+  render();
 }
 
 let custos = lentes.map(l => l.custo);
 let currentPlan = 0;
-
-loadState();
 
 document.getElementById('hoje').textContent = 'Atualizado em ' + new Date().toLocaleDateString('pt-BR');
 
@@ -420,8 +467,11 @@ document.getElementById('tabs').addEventListener('click', e => {
   render();
 });
 
-buildFaixas();
-render();
+(async () => {
+  await loadState();
+  buildFaixas();
+  render();
+})();
 </script>
 </body>
 </html>
