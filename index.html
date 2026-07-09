@@ -189,47 +189,89 @@ const lentes = [
   {brand:'Johnson & Johnson', nome:'Tecnis One Asférica',          custo:411.83,  cat:'baixo'},
   {brand:'Alcon',             nome:'SN60WF',                       custo:550,     cat:'baixo'},
   {brand:'Zeiss',             nome:'CT Asphina',                   custo:409.5,   cat:'baixo'},
-  {brand:'BVI',               nome:'Micropure',                    custo:420,     cat:'baixo'},
+  {brand:'BVI',               nome:'Micropure',                    custo:420,     cat:'medio'},
 ];
 
-// ── PERSISTÊNCIA localStorage ────────────────────────────────────
-const STORAGE_KEY = 'liovisum_v2';
+// ── PERSISTÊNCIA GitHub Gist ─────────────────────────────────────
+const GH_TOKEN  = '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';
+const GIST_ID   = '39a618149b299bf8fc7bd44edbe62005';
+const GIST_FILE = 'dados.json';
+const GIST_API  = `https://api.github.com/gists/${GIST_ID}`;
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ custos, precos }));
-    const ind = document.getElementById('saved-indicator');
-    if (ind) { ind.style.display='inline'; clearTimeout(ind._t); ind._t = setTimeout(()=>ind.style.display='none', 2000); }
-  } catch(e) {}
+function showIndicator(msg, color) {
+  const ind = document.getElementById('saved-indicator');
+  if (!ind) return;
+  ind.textContent = msg;
+  ind.style.color = color || '#8ecf93';
+  ind.style.display = 'inline';
+  clearTimeout(ind._t);
+  ind._t = setTimeout(() => ind.style.display = 'none', 3000);
 }
 
-function resetState() {
+async function saveState() {
+  showIndicator('⟳ Salvando...', '#a0a09c');
+  try {
+    const data = { custos, precos };
+    const res = await fetch(GIST_API, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `token ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        files: { [GIST_FILE]: { content: JSON.stringify(data, null, 2) } }
+      })
+    });
+    if (res.ok) {
+      showIndicator('● Valores salvos', '#8ecf93');
+    } else {
+      const err = await res.json();
+      console.error('Gist save error:', err);
+      showIndicator('⚠ Erro ao salvar', '#f5a623');
+    }
+  } catch(e) {
+    console.error('saveState error:', e);
+    showIndicator('⚠ Erro ao salvar', '#f5a623');
+  }
+}
+
+async function loadState() {
+  showIndicator('⟳ Carregando...', '#a0a09c');
+  try {
+    const res = await fetch(GIST_API, {
+      headers: {
+        'Authorization': `token ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+    if (!res.ok) { showIndicator('', ''); return; }
+    const json = await res.json();
+    const raw = json.files[GIST_FILE]?.content;
+    if (!raw) { showIndicator('', ''); return; }
+    const saved = JSON.parse(raw);
+    if (saved) {
+      if (Array.isArray(saved.custos) && saved.custos.length === lentes.length) custos = saved.custos;
+      if (saved.precos && typeof saved.precos === 'object') precos = { ...precos, ...saved.precos };
+    }
+    showIndicator('● Dados carregados', '#8ecf93');
+  } catch(e) {
+    console.error('loadState error:', e);
+    showIndicator('', '');
+  }
+}
+
+async function resetState() {
   if (!confirm('Restaurar todos os valores para o padrão original?')) return;
-  localStorage.removeItem(STORAGE_KEY);
   custos = lentes.map(l => l.custo);
   precos = { alto:10800, medio:5800, baixo:4200 };
+  await saveState();
   buildFaixas();
   render();
 }
 
-function loadState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (saved) {
-      if (Array.isArray(saved.custos) && saved.custos.length === lentes.length) {
-        custos = saved.custos;
-      }
-      if (saved.precos && typeof saved.precos === 'object') {
-        precos = { ...precos, ...saved.precos };
-      }
-    }
-  } catch(e) {}
-}
-
 let custos = lentes.map(l => l.custo);
 let currentPlan = 0;
-
-loadState();
 
 document.getElementById('hoje').textContent = 'Atualizado em ' + new Date().toLocaleDateString('pt-BR');
 
@@ -420,8 +462,11 @@ document.getElementById('tabs').addEventListener('click', e => {
   render();
 });
 
-buildFaixas();
-render();
+(async () => {
+  await loadState();
+  buildFaixas();
+  render();
+})();
 </script>
 </body>
 </html>
